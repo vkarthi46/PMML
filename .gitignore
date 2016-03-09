@@ -1,0 +1,71 @@
+# Working Directory
+setwd("C:\\Users\\vkarth2\\Desktop\\POC-New\\Be-Be\\Mar'16")
+# Required Packages
+# install.packages("pacman")
+pacman::p_load(RCurl,pmmlTransformations,pmml,XML,dplyr,data.table,zoo,DescTools,forecast,foreach,doParallel,e1071,kernlab,earth,caret,randomForest,nnet) 
+
+# Reading The Data
+data=read.csv("C:\\Users\\vkarth2\\Desktop\\POC-New\\Be-Be\\Mar'16\\till Feb'16.csv")
+
+WOM_1=as.factor(data$WOM);Day_1=as.factor(data$Day);final_data=data.frame(cbind(data,WOM_1,Day_1))
+
+# Build Models
+fit_MLR=lm(data$Phone~Day_1+WOM_1,data=data)
+
+# export model as pmml
+MLR_pmml=pmml(fit_MLR_Future,name="ARIMA",data=data)
+xmlFile=file.path(getwd(),"ARIMA.xml")
+h=saveXML(arima_pmml,xmlFile)
+
+# Prediction
+# -----------------------------------Forecast-------------------------------------------
+# Creating Sequence of Date
+x=cbind.data.frame(data[,1]);st=(x[(nrow(x)),]);v=as.Date((st), format='%d-%B-%y');Date_2=cbind.data.frame(seq(as.Date(v+1),as.Date(v+No_ahead),by=1));colnames(Date_2)="Date";
+f13=as.factor(weekdays(as.Date(Date_2$Date,'%Y-%m-%d')));f23=as.factor(monthweeks(Date_2$Date))
+fl3=cbind.data.frame(as.factor(weekdays(as.Date(Date_2$Date,'%Y-%m-%d'))));colnames(fl3)="Day";fk3=cbind.data.frame(as.factor(monthweeks(Date_2$Date)));colnames(fk3)="WOM";
+new=data.frame(Day_1=f13,WOM_1=f23)
+predictPMMLModel=function(dataset,transformTargetAttribute,modelURL,applServerURL)
+{
+require(XML)
+require(RCurl)
+header <- paste(colnames(dataset), collapse=",") # extract header
+# transformation to characters is necessary to avoid some “bad surprise” 
+# from R's handling of factor attributes
+datasetTransf <- data.frame(lapply(dataset, as.character), stringsAsFactors=FALSE)
+dataString <- paste(header,"|", paste(do.call("rbind",by(datasetTransf, 1:nrow(datasetTransf), function(row){paste(row, collapse=",")
+}, simplify = FALSE)), collapse ="|"), "|", sep = "")
+
+# create xml document
+xmlHeader <- xmlPINode(sys = 'xml', value = 'version="1.0" encoding="UTF-8"')
+xmlRequest <- xmlNode("scoring_request", 
+xmlNode("pmml_url", modelURL), 
+xmlNode("model_name"),
+xmlNode("csv_input_rows",xmlCDataNode(dataString)))
+
+# xml request as string
+fullXMLRequest <- paste(toString(xmlHeader),"\n", gsub(" ", "", toString(xmlRequest, sep=""), fixed = TRUE))
+
+# http post request
+r = dynCurlReader()
+curlPerform(postfields = fullXMLRequest, url = applServerURL, verbose = TRUE, post = 1L, writefunction = r$update)
+    r$value()
+
+# parse results - !!caution: currently no error checking!!
+tmp <- xmlTreeParse(r$value())
+predictionString <- xmlValue(tmp[[1]][[1]][[4]])
+# extract predictions line by line
+predictionLines <- strsplit(predictionString, split ="|", fixed = TRUE)[[1]][-1]
+predictions <- transformTargetAttribute(sapply(predictionLines, function(s){gsub('\"','',
+tail(strsplit(s, ',', fixed = TRUE)[[1]], n=1))}))
+names(predictions) <- NULL
+return(predictions)
+}
+
+# prediction
+prediction1 <- predictPMMLModel(dataset = new, 
+    transformTargetAttribute = factor, 
+    modelURL = paste("file://", h, sep = ""), 
+    applServerURL = "http://localhost:8080/OpenScoring/Scoring")
+#table(data$Phone, prediction1) 
+
+
