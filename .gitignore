@@ -1,33 +1,31 @@
 # Working Directory
-setwd("C:\\Users\\vkarth2\\Desktop\\POC-New\\Be-Be\\Mar'16")
+setwd("C:\\Users\\vkarth2\\Desktop\\Competitions\\AV\\Practice Problem-1\\Dressify")
 # Required Packages
 # install.packages("pacman")
-pacman::p_load(RCurl,pmmlTransformations,pmml,XML,dplyr,data.table,zoo,DescTools,forecast,foreach,doParallel,e1071,kernlab,earth,caret,randomForest,nnet) 
+pacman::p_load(caTools,rpart,arm,RCurl,pmmlTransformations,pmml,XML) 
 
 # Reading The Data
-data=read.csv("C:\\Users\\vkarth2\\Desktop\\POC-New\\Be-Be\\Mar'16\\till Feb'16.csv")
-WOM_1=as.factor(data$WOM);Day_1=as.factor(data$Day);final_data=data.frame(cbind(data,WOM_1,Day_1))
-No_ahead=250
-# Build Models
-fit_MLR=lm(data$Phone~Day_1+WOM_1,data=data)
+data=read.csv("C:\\Users\\vkarth2\\Desktop\\Competitions\\AV\\Practice Problem-1\\Dressify\\Train.csv")
+data$Rating=as.factor(data$Rating)
 
-# export model as pmml
-MLR_pmml=pmml(fit_MLR,name="Multiple Linear Regression",data=data)
-xmlFile=file.path(getwd(),"Multiple Linear Regression.xml")
-export_xml=saveXML(MLR_pmml,xmlFile)
+# Spilit Train and Test Data
+require(caTools)
+set.seed(101) 
+sample = sample.split(data[,1], SplitRatio = .75)
+train = subset(data, sample == TRUE)
+test1= subset(data, sample == FALSE)
+test=test1[,-(length(test1))]
+
+train$Rating=as.factor(train$Rating)
+test$Rating=as.factor(test$Rating)
+
+# Build Models
+model<-rpart(Recommended~.,data=train)
+
+## export as pmml
+export_xml=saveXML(pmml(model, model.name = "Binary Logistic Regression", app.name = "RR/PMML", dataset = data), file ="Binary Logistic Regression.xml") 
 
 # Prediction
-# -----------------------------------Forecast-------------------------------------------
-# Creating Sequence of Date
-monthweeks=function(x) { UseMethod("monthweeks");}
-monthweeks.Date=function(x) { ceiling(as.numeric(format(x,"%d"))/7);}
-monthweeks.POSIXlt=function(x) {ceiling(as.numeric(format(x,"%d"))/7);}
-monthweeks.character=function(x) {ceiling(as.numeric(format(as.Date(x),"%d"))/7);}
-x=cbind.data.frame(data[,1]);st=(x[(nrow(x)),]);v=as.Date((st), format='%d-%B-%y');Date_2=cbind.data.frame(seq(as.Date(v+1),as.Date(v+No_ahead),by=1));colnames(Date_2)="Date";
-f13=as.factor(weekdays(as.Date(Date_2$Date,'%Y-%m-%d')));f23=as.factor(monthweeks(Date_2$Date))
-fl3=cbind.data.frame(as.factor(weekdays(as.Date(Date_2$Date,'%Y-%m-%d'))));colnames(fl3)="Day";fk3=cbind.data.frame(as.factor(monthweeks(Date_2$Date)));colnames(fk3)="WOM";
-new=data.frame(Day_1=f13,WOM_1=f23)
-
 predictPMMLModel=function(dataset,transformTargetAttribute,modelURL,applServerURL)
 {
   require(XML)
@@ -61,7 +59,47 @@ predictPMMLModel=function(dataset,transformTargetAttribute,modelURL,applServerUR
   return(predictions)
 }
 # prediction
-prediction_MLR=predictPMMLModel(dataset = new,transformTargetAttribute = factor, modelURL = paste("file://", export_xml, sep = ""), 
-                                applServerURL = "http://216.150.189.2:8080/OpenScoring/Scoring")
-#table(data$Phone, prediction_MLR) 
+prediction_MLR=predictPMMLModel(dataset = test,transformTargetAttribute = factor, modelURL = paste("file://", export_xml, sep = ""), 
+                                applServerURL = "http://10.0.2.2:8080/OpenScoring/Scoring")
+
+
+# scoring(obtaining predicted probability)
+scores<-predict(model,test)
+scored<-cbind(test1,scores)
+
+#sensitivity and specificity for varying cut values
+#creating space for storing sensitivity and specificity
+cutpoints<-seq(0,1,0.01)
+length(cutpoints)
+sensitivity<-seq(1,101,1)	
+specificity<-seq(1,101,1)
+cutpoint_performance<-cbind(cutpoints,sensitivity,specificity)
+table(scored$Recommended)
+
+for(i in 1:101)
+{
+  scored$predicted<-ifelse(scored$scores<cutpoint_performance[i,1],0,1)
+  scored$sumed<-scored$predicted+scored$Recommended
+  scored$pred_1<-ifelse(scored$sumed==2,1,0)
+  correct_1<-sum(scored$pred_1)
+  scored$pred_0<-ifelse(scored$sumed==0,1,0)
+  correct_0<-sum(scored$pred_0)
+  cutpoint_performance[i,2]<-correct_1/28
+  cutpoint_performance[i,3]<-correct_0/50
+}
+Cutvalue_table<-table(scored$Recommended,scored$predicted)
+Cutvalue_table
+cutvalue_table<-data.frame(cutpoint_performance)
+cutvalue_table$diff<-abs(cutvalue_table$sensitivity-cutvalue_table$specificity)
+
+# tabulation for creating gains chart
+sorted<-scored[order(-scored$scores),]
+sorted$row_id<-seq(1,nrow(sorted),1)
+sorted$grp<-trunc((sorted$row_id/nrow(sorted))*10)+1
+sorted$group<-ifelse(sorted$grp==11,10,sorted$grp)
+gains_chart<-table(sorted$group,sorted$Coupen)
+cum_events<-cumsum(gains_chart[,2])
+gains_chart<-cbind(gains_chart,cum_events)
+cum_prob_events<-cum_events/11
+gain_chart<-cbind(gains_chart,cum_prob_events)
 
