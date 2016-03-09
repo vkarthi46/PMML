@@ -17,7 +17,6 @@ xmlFile=file.path(getwd(),"Multiple Linear Regression.xml")
 export_xml=saveXML(MLR_pmml,xmlFile)
 
 # Prediction
-# -----------------------------------Forecast-------------------------------------------
 # Creating Sequence of Date
 x=cbind.data.frame(data[,1]);st=(x[(nrow(x)),]);v=as.Date((st), format='%d-%B-%y');Date_2=cbind.data.frame(seq(as.Date(v+1),as.Date(v+No_ahead),by=1));colnames(Date_2)="Date";
 f13=as.factor(weekdays(as.Date(Date_2$Date,'%Y-%m-%d')));f23=as.factor(monthweeks(Date_2$Date))
